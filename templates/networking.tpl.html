@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+@@include('../partials/_head.html')
+<body>
+
+@@include('../partials/_nav.html')
+
+<div class="container">
+
+  <div class="starter-template">
+    <h1>DICOM Networking</h1>
+  </div>
+
+  <div class="row">
+    <div class="col-md-3">
+      <nav class="bs-docs-sidebar" data-spy="affix" data-offset-top ="215" data-offset-bottom="0">
+        <ul class="nav nav-stacked fixed">
+          <li><a href="#assorequest">Requesting an Association</a></li>
+          <li><a href="#assoaccept">Accepting an Association</a></li>
+          <li><a href="#dimseexchange">Exchanging DIMSE messages</a></li>
+          <li><a href="#sendrequest">Sending a DIMSE Command Request</a></li>
+          <li><a href="#receiveresponse">Receiving a DIMSE Command Response</a></li>
+          <li><a href="#receiverequest">Receiving a DIMSE Command Request</a></li>
+          <li><a href="#sendresponse">Sending a DIMSE Command Response</a></li>
+          <li><a href="#release">Releasing an Association</a></li>
+          <li><a href="#abort">Aborting an Association</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="col-md-9">
+      <h1 id="assorequest">Requesting an Association</h1>
+      <p>Before DIMSE messages can be exchanged between AEs, an Association between the AEs has to be established. When your application is the initiator of DIMSE messages you need to create a TCP/IP network connection with the AE with which you want to exchange messages and request an Association over the TCP/IP network connection. The remote AE will either acknowledge or reject the Association request. Typically SCUs are the initiator of DIMSE messages and thus request the creation of an Association with remote AEs. For example a Storage SCU that wants to send a DICOM image to a Storage SCP , will typically create a TCP/IP connection to the Storage SCP and request an Association on the TCP/IP connection. Also SCPs sometimes need to request Associations when they need to send N-EVENT-REPORT DIMSE messages.</p>
+
+      <h3>Step 1: Create a TCP/IP connection</h3>
+      <p>The first step in requesting an Association is the creation of a TCP/IP connection with a remote AE. For example:</p>
+      <pre><code class="lang-java">Socket s = new Socket("pacs1.acme.com",104);</code></pre>
+      <p>This creates a open socket connection on port 104 to the server with DNS name pacs1.acme.com.</p>
+
+      <h3>Step 2: Create an AssociationIO Object</h3>
+      <p>You need a com.archimed.dicom.network.AssociationIO object to exchange DIMSE messages. The AssociationIO object is initialized with the inputstream and outputstream of the open TCP/IP connection.</p>
+        <pre><code class="lang-java">InputStream in = s.getInputStream();
+          OutputStream out = s.getOutputStream();
+          AssociationIO as = new AssociationIO(in,out);</code></pre>
+      <p>The AssociationIO object will be used to send the Association request, receive the response and to send and receive all DIMSE messages.</p>
+
+      <h3>Step 3: Create an Association Request</h3>
+      <p>The Association Request contains important information such as our AE title, the remote AE title, the SOP Classes for which we want to setup an association and the transfer syntaxes that we want to use. For example:</p>
+        <pre><code class="lang-java">Request request = new Request();
+          request.setCalledTitle("IMG_ARCHIVE1");
+          request.setCallingTitle("IMG_WORKSTATION1");
+
+          int[] transfersyntaxes = {TransferSyntax.ImplicitVRLittleEndian};
+          request.addPresentationContext(1,SOPClass.SecondaryCaptureImageStorage,transfersyntaxes);</code></pre>
+      <p>
+        The proposed presentation context is here created with presentation context ID 1. This number is used later on in identifying in which presentation context DIMSE message are exchanged. One can propose multiple presentation contexts in one Request. The presentation context ID must be odd, between 1 and 255 and unique per proposed presentation context.
+        In the Request one can optionally specify:
+      </p>
+      <ul>
+        <li>The Implementation Class UID and Implementation Version Name (otherwise defaults apply)
+        <li>the SCU/SCP role selection for every abstract syntax
+        <li>the maximum number of operations invoked and performed
+        <li>the maximum PDU size that we are willing to receive
+        <li>extended negotiation data
+      </ul>
+
+      <h3>Step 4: Send the Association Request</h3>
+      <p>When the Request is created and properly configured, it can be sent to the remote AE with the AssociationIO object:</p>
+      <pre><code class="lang-java">as.write(request);</code></pre>
+      <p>The write method will format the request as an A-ASSOCIATE-RQ PDU and send it to the remote AE.</p>
+
+      <h3>Step 5: Read the response from the remote AE</h3>
+      <p>When the remote AE has received the Association Request, it will process it and send a response. In general this can be an Association Acknowledge or an Association Reject. If an unexpected condition occurs the AE might also send an Associate Abort.</p>
+
+      <p>For example to receive and interpret the response from the remote AE:</p>
+        <pre><code class="lang-java">//read the response from the network
+          ULServiceMessage ulServiceMessage = as.read();
+
+          //process the response
+          switch (ulServiceMessage.getMessageType())
+          {
+          case ULServiceMessage.ASS_ACKNOWLEDGE:
+          System.out.println("received associate aknowledge");
+          break; //jump out of the switch statement
+          case ULServiceMessage.ASS_REJECT:
+          System.out.println("Association rejected by remote AE");
+          //dump the content of the Reject to System.out
+          System.out.println(ulServiceMessage);
+          //close the TCP/IP connection
+          s.close();
+          return;
+          case ULServiceMessage.ABORT:
+          System.out.println("Association aborted by remote AE");
+          //dump the content of the Abort to System.out
+          System.out.println(ulServiceMessage);
+          //close the TCP/IP connection
+          s.close();
+          return;
+          default:
+          System.out.println("unexpected message received from remote AE");
+          //dump the content
+          System.out.println(ulServiceMessage);
+          //close the TCP/IP connection
+          s.close();
+          return;
+          }
+          //here starts the exchange of DIMSE messages
+          //...</code></pre>
+
+      <p>The code above is merely an example. Real applications would handle the different message types more thoroughly. See the com.archimed.dicom.examples.Example1 class for a complete example of the setup of an association.</p>
+
+
+      <h1 id="assoaccept">Accepting an Association</h1>
+      <p>When a DICOM Application Entity is the Acceptor of Associations it must be able to listen to incoming Associate Request messages and respond with Acknowledge or Reject messages. Such application entities typically wait for incoming TCP/IP connection requests on a certain port number. Once a TCP/IP connection is established the application reads the incoming Associate Request message, processes the message and responds with an Associate Acknowledge or Associate Reject message. Application Entities that act as the SCP for Service Classes must be able to accept incoming association requests. Application Entities that act as an SCU for Service Classes that provide notifications through the N-EVENT-REPORT DIMSE message, must also be able to accept incoming Association Requests.</p>
+
+      <p>The functionality of listening to TCP/IP connection requests and establishing TCP/IP connections is not embedded within the JDT classes. Use the classes of the java.net package or an alternative TCP/IP network package to listen to and establish connections. JDT requires an inputstream and outputstream of an open connection for reading and writing data.</p>
+
+      <p>Typically applications that accept Association requests and provide the exchange of DIMSE messages over established associations, act as a server and must be able to handle a number of active associations concurrently. JDT makes no assumptions on the choice of server architecture and how the concurrent connections are managed.</p>
+
+      <h3>Step 1: Create an AssociationIO object</h3>
+      <p>We start from the point where a TCP/IP connection has been established and a valid socket is available. Similar as when sending an Associate Request, we need a <code>com.archimed.dicom.network.AssociationIO</code> object to exchange messages.</p>
+
+        <pre><code class="lang-java">Socket s = ...;
+          AssociationIO as = new AssociationIO(s.getInputStream(),s.getOutputStream());</code></pre>
+
+      <h3>Step 2: Read the Associate Request from the remote AE</h3>
+      <p>The first message sent on the TCP/IP connection will be the Association Request from the requestor to the acceptor. With the AssociationIO class we read the message from the connection and check if it is actually an Associate Request:</p>
+
+        <pre><code class="lang-java">ULServiceMessage ulServiceMessage = as.read();
+
+          if (ulServiceMessage.getMessageType() != ULServiceMessage.ASS_REQUEST)
+          {
+          System.out.println("unexpected message received from remote AE");
+          System.out.println(ulServiceMessage);
+          return;
+          }
+          System.out.println("incoming associate request");
+          System.out.println(ulServiceMessage);</code></pre>
+
+      <h3>Step 3: Create an Associate Acknowledge or Associate Reject</h3>
+
+      <p>The incoming Associate Request has to be interpreted and a proper response must be sent back to the remote AE. The content of the Request object can be inspected with the various methods of the Request class. Alternatively one can make use of the com.archimed.dicom.network.ResponsePolicy class to create a Reject or Acknowledge based on the contents of the incoming Request and a number of criteria. Consult the API of the ResponsePolicy class for details. For example:</p>
+
+          <pre><code class="lang-java">int[] allowedSOPClasses = {SOPClass.Verification};
+            ULServiceMessage resMessage = ResponsePolicy.prepareResponse((Request)ulServiceMessage,
+            "IMG_ARCHIVE1",null,allowedSOPClasses,TransferSyntax.ImplicitVRLittleEndian,true);</code></pre>
+
+      <p>The prepareResponse method of the ResponsePolicy class creates a Reject object or an Acknowledge object based on whether the Request is acceptable or not given the different criteria in the arguments of the method. In this particular example the method will return an Acknowledge object if the called AE title in the Request equals 'IMG_ARCHIVE1' and if there is a presentation context proposed for the Verification SOP Class and the Implicit VR Little Endian Transfer Syntax. Because the last argument is set to true, method will return a Reject message in all other cases.</p>
+
+      <p>The use of the ResponsePolicy class is optional. Implementations that need more refined control over the construction of an Acknowledge and Reject can create and configure these objects directly without the use of the ResponsePolicy class.</p>
+
+      <h3>Step 4: Send the response back to the remote AE</h3>
+
+      <p>The response message must be sent back to the remote AE. This is again done with the AssociationIO instance. Depending on whether the response is a Reject or Acknowledge the program flow can be different.</p>
+
+        <pre><code class="lang-java">//write back the response
+          as.write(resMessage);
+          if (resMessage.getMessageType() == ULServiceMessage.ASS_REJECT)
+          {
+          System.out.println("association was rejected");
+          System.out.println(resMessage);
+          return;
+          }
+
+          //continue here with exchanging DIMSE messages
+          //... </code></pre>
+
+      <p>After an Acknowledge message is sent the association is established and the exchange of DIMSE message can begin.</p>
+
+      <p>See the com.archimed.dicom.examples.Example2 class for a complete example of the setup of an association as an association acceptor.</p>
+
+      <h1 id="dimseexchange">Exchanging DIMSE messages</h1>
+      <p>After an association has been established between two AEs, the AEs can begin exchanging DIMSE messages. These messages are sent and received with the same AssociationIO instance used to establish the association.
+      </p>
+      <p>DIMSE messages always have a <code>Command</code> part and can optionally have a Data Set carrying the data associated with the Command. For example the C-ECHO-RQ message , which is used in the Verification SOP Class , has no associated Data Set. The C-STORE-RQ message, used in the Storage Service Class, always has a related Data Set.</p>
+
+      <p>When two AEs are connected through an association, one AE will always take the role of invoking DIMSE-Service-User and will send Command Request Messages. The other AE will take the role of performing DIMSE-Service-User and will answer the Command Request messages with Command Response messages. Except for the C-CANCEL Command Request messages (C-CANCEL-FIND,C-CANCEL-MOVE and C-CANCEL-GET) every Command Request message has a corresponding Command Response message. For example the C-STORE-RQ message has a corresponding C-STORE-RES message.</>
+
+      <p>A Command Request message can be answered with multiple Command Response messages. For example a C-FIND-RQ message used to query a PACS system with the Query/Retrieve Service class, can result in multiple C-FIND-RES messages being returned.</p>
+
+      <p>Every DIMSE message is sent in the context of a negotiated presentation context. The presentation context ID is used to identify in which presentation context a DIMSE message is sent.</p>
+
+      <p>The creation and handling of Command Request messages and Command Response messages is done with the com.archimed.dicom.network.Command class and the com.archimed.dicom.network.Dimse class. The Dimse class represents a complete Command Request or Command Response message including the used presentation context ID, the Command part of the message and an optional Data Set. The Command class represents the Command part of the DIMSE message. Because a Command is a special kind of Data Set, the Command class is a subclass of com.archimed.dicom.DicomObject.</p>
+
+      <p>See the topics on</p>
+      <ul>
+        <li>Sending a DIMSE Command Request
+        <li>Receiving a DIMSE Command Response
+        <li>Receiving a DIMSE Command Request
+        <li>Sending a DIMSE Command Response
+      </ul>
+      <p>for details on sending and receiving DIMSE messages as an invoking DIMSE-Service-User or a performing DIMSE-Service-User.</p>
+
+      <h1 id="sendrequest">Sending a DIMSE Command Request</h1>
+
+      <p>The invoking DIMSE-Service-User sends Command Request messages to a remote AE and receives Command Response messages from the remote AE. For DIMSE messages related to an operation service such as the C-STORE service or the N-CREATE service the invoking DIMSE-Service-User has the role of the Service Class User (SCU). For DIMSE messages related to a notification service - the N-EVENT-REPORT message - the invoking DIMSE-Service-User has the role of a Service Class Provider (SCP).
+      </p>
+      <p>You use the static create methods of the <code>Command</code> class to create new Command instances for request messages and you use the Dimse class to create the actual messages containing the presentation context ID, the Command object and an optional Data Set. To send the messages, you must use the AssociationIO instance that was used for establishing the Association. For example to send a C-ECHO-RQ message to a remote AE, which never has an associated data set, you would typically do something like:</p>
+
+        <pre><code class="lang-java">AssociationIO as;
+          //assume a valid AssociationIO instance
+          //create a C-ECHO-RQ Command for the Verification SOP Class with message ID 1
+          Command cmd = Command.createCEchoReq(1,SOPClass.Verification);
+
+          //create a DIMSE message around the previously created Command without a Data Set
+          //and in presentation context 1. Here is assumed that the Verification SOP Class
+          //was actually proposed and accepted in a presentation context with ID equal to 1.
+          Dimse cEchoReq = new Dimse(1,cmd,null);
+
+          //send the DIMSE message
+          as.write(cEchoReq);</code></pre>
+
+      <h3>Sending an Associated Data Set</h3>
+      <p>In the event that a data set is associated with the command, the code remains the same except that the data set in the form of a DicomObject is specified in the Dimse constructor. For example in a C-STORE-RQ message for an image:</p>
+
+        <pre><code class="lang-java">AssociationIO as;
+          DicomObject dcm;
+
+          //assume a valid AssociationIO instance and a DicomObject
+          //containing a composite SOP Instance of an image
+          //create a C-STORE-RQ Command for the SecondaryCaptureImageStorage SOP Class
+          //with message ID 1, priority 0 and SOP Instance UID 1.2.3.4
+          Command cmd = Command.createCStoreReq(1,SOPClass.SecondaryCaptureImageStorage,0,"1.2.3.4");
+
+          //create a DIMSE message around the previously created Command and the data set
+          //for presentation context 2. Here is assumed that the SecondaryCaptureImageStorage SOP Class
+          //was actually proposed and accepted in a presentation context with ID equal to 2.
+          Dimse cStoreReq = new Dimse(2,cmd,dcm);
+
+          //send the DIMSE message
+          as.write(cStoreReq);</code></pre>
+
+      <p>See Example1.java for a complete example of sending a C-ECHO-RQ message and receiving a C-ECHO-RES message.</p>
+
+      <h1 id="receiveresponse">Receiving a DIMSE Command Response</h1>
+
+      <p>You must use the same AssociationIO instance for reading a Command Response message from the network than the instance used for establishing the Association and sending the Command Request. The read method of AssociationIO will return a Dimse object that contains the presentation context ID of the presentation context used for sending the Command Response, the Command itself and an optional Data Set.</p>
+
+        <pre><code class="lang-java">//read response
+          ULServiceMessage ulServiceMessage = as.read();
+
+          //check that the response is actually a DIMSE message
+          if (ulServiceMessage.getMessageType()&nbsp;\!= ULServiceMessage.DIMSE)
+          {
+          System.out.println("received unexpected message,sending abort");
+          as.write(new Abort(Abort.DICOM_UL_SERVICE_PROVIDER,Abort.UNEXPECTED_PDU);
+          s.close();
+          return;
+          }
+
+          //dump the response on screen as a Data Set
+          System.out.println("received the following response:");
+          cmd = ((Dimse)ulServiceMessage).getCommand();
+          cmd.dumpVRs(System.out);
+          System.out.println();
+
+          //check the status in the C-ECHO-RES
+          if ((cmd.getCommandType() == Command.C_ECHO_RESPONSE) && (cmd.getStatus() == 0x0000))
+          {
+          System.out.println("remote AE indicates verification OK");
+          }</code></pre>
+
+      <h3>Reading an Associated Data Set</h3>
+      <p>Command Response messages can contain a Data Set. The Data Set can be retrieved as an InputStream with the getDataSetInputStream method of the Dimse class or directly as a DicomObject with the getDataSet method of the Dimse class. The two methods should not be used together on the same Dimse instance.</p>
+
+      <p>The inputstream returned by getDataSetInputStream contains the data set unwrapped from the PDU structures. The stream can be used to save the data set as it is received from the remote AE or it can for example be used with a DicomReader to read the Data Set into a DicomObject.</p>
+
+      <p>The first call to the getDataSet method will read the entire Data Set into a DicomObject and return it. A reference to this DicomObject instance is held by the Dimse instance and is returned in subsequent calls to getDataSet.</p>
+
+
+      <h1 id="receiverequest">Receiving a DIMSE Command Request</h1>
+      <p>The performing DIMSE-Service-User receives Command Requests after an association has been established. The same AssociationIO instance that was used to establish an association, must be used to read DIMSE Command Requests and write DIMSE Command Responses.</p>
+
+      <p>The following example shows the reception of a C-ECHO-RQ on an established association.</p>
+
+        <pre><code class="lang-java">//read the DIMSE message, should be a C-ECHO-RQ
+          ulServiceMessage = as.read();
+
+          //check that the message is in fact a DIMSE message
+          if (ulServiceMessage.getMessageType() != ULServiceMessage.DIMSE)
+          {
+          System.out.println("unexpected message received, aborting");
+          as.write(new Abort(Abort.DICOM_UL_SERVICE_USER,Abort.UNEXPECTED_PDU));
+          return;
+          }
+
+          //we know here that the ULServiceMessage is a of class Dimse so we can cast it safely
+          Dimse dimse = (Dimse)ulServiceMessage;
+
+          //dump the contents of the command to System.out as a DicomObject
+          Command cmd = dimse.getCommand();
+          System.out.println(">>received following command request");
+          cmd.dumpVRs(System.out);
+
+          //check that the Command is a C-ECHO-RQ
+          if (cmd.getCommandType() != Command.C_ECHO_REQUEST)
+          {
+          System.out.println("unexpected command request, aborting");
+          as.write(new Abort(Abort.DICOM_UL_SERVICE_USER,Abort.UNEXPECTED_PDU_PARAMETER));
+          return;
+          }
+
+          //further processing of the C-ECHO-RQ
+          //...</code></pre>
+
+      <p>See Example2.java for a complete example of receiving a C-ECHO-RQ message and sending back a C-ECHO-RES message.</p>
+
+      <p>In general an association may be established with a number of accepted presentation contexts corresponding to different service classes. As a result a performing DIMSE-Service-User may not know in advance which type of Command Request it is going to receive and it should be prepared to receive multiple types of Command Requests and process them accordingly. The program structure must reflect this so that the program flow is determined by the type of Command Request that is received.</p>
+
+      <h3>Reading an Associated Data Set</h3>
+      <p>Command Request messages can optionally have a related Data Set. The reading of such a Data Set is similar to when reading a Data Set in a Command Response.</p>
+
+      <h1 id="sendresponse">Sending a DIMSE Command Response</h1>
+
+      <p>After the performing DIMSE-Service-User has received and interpreted a Command Request message, he answers with one or more Command Response messages. The Command class contains a number of static methods that create proper Command Responses for corresponding Command Requests. The methods will create Command Responses with a message ID corresponding to the Command Request specified in the first argument. The other arguments in the create methods are used the specify values of additional Data Elements present in the Command Response.</p>
+
+      <p>For example, to create a C-ECHO-RES response message for a C-ECHO-RQ request message:</p>
+
+        <pre><code class="lang-java">//assume a Command from a C-ECHO-RQ message
+          Command cmd;
+          //...
+
+          //create a C-ECHO-RES command with corresponding message ID and status 0 (means OK)
+          Command resCmd = Command.createCEchoRes(cmd,0);
+
+          //create the DIMSE message, null indicates no associated Data Set
+          Dimse cEchoRes = new Dimse(dimse.getPresentationContextId(),resCmd ,null);
+
+          //send the Command Response
+          as.write(cEchoRes);</code></pre>
+
+      <h3>Sending an Associated Data Set in a Command Response</h3>
+      <p>A DIMSE Command Response can optionally have an associated Data Set that is sent after the Command part. For example, in response to a C-FIND-RQ message a performing DIMSE-Service-User must send a C-FIND-RES message including a Data Set for every SOP instance that matches the query criteria included in the identifier (data set) of the C-FIND-RQ message and finally an extra C-FIND-RES message indicating the end of the query results without an associated Data Set. The sending of an associated Data Set in a Command Response is identical to sending an associated Data Set in a Command Request.</p>
+
+      <h1 id="release">Releasing an Association</h1>
+      <p>After the exchange of DIMSE messages is completed, the requestor of an Association must release the Association. The requestor of the Association must send a Release Request message and the acceptor of the Association must respond with a Release Response message:</p>
+
+        <pre><code class="lang-java">//release the association
+          as.write(new ReleaseRequest());
+          System.out.println("sent release request");
+
+          //read the response
+          ulServiceMessage = as.read();
+          if (ulServiceMessage.getMessageType == ULServiceMessage.REL_REQUEST)
+          {
+          System.out.println("received release response");
+          }
+          else
+          {
+          System.out.println("unexpected message received from remote AE");
+          System.out.println(ulServiceMessage);
+          }</code></pre>
+
+      <h1 id="abort">Aborting an Association</h1>
+      <p>Under normal circumstances an Abort message is never sent to a remote AE. However, in the event that an exception occurs and the association with the remote AE must be terminated, you can send an Abort message with a source and reason parameter. For example:</p>
+
+        <pre><code class="lang-java">AssociationIO as;
+          Socket s;
+
+          //assume a properly initialized Socket and AssociationIO instance
+          Abort abort = new Abort(Abort.DICOM_UL_SERVICE_PROVIDER,Abort.REASON_NOT_SPECIFIED);
+          as.write(abort);
+          s.close();</code></pre>
+
+    </div>
+  </div>
+</div>
+
+@@include('../partials/_footer.html')
+
+@@include('../partials/_script.html')
+
+</body>
+</html>
+

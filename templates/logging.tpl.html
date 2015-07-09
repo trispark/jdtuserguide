@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+@@include('../partials/_head.html')
+<body>
+
+@@include('../partials/_nav.html')
+
+<div class="container">
+
+  <div class="starter-template">
+    <h1>Logging</h1>
+  </div>
+
+  <div class="row">
+    <div class="col-md-3">
+      <nav class="bs-docs-sidebar" data-spy="affix" data-offset-top ="215" data-offset-bottom="0">
+        <ul class="nav nav-stacked fixed">
+          <li><a href="#introduction">Introduction</a></li>
+          <li><a href="#loggingjdt">Logging with JDT's internal logging framework</a></li>
+          <li><a href="#loggingexisting">Integrating with an existing logging framework</a></li>
+          <li><a href="#example">Example: Using Apache Log4j</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="col-md-9">
+      <h1 id="introduction">Introduction</h1>
+      <p>
+        Logging and interpreting log messages can be an invaluable tool during the debugging and testing of your applications and in general provides detailed information
+        on the execution of code. JDT provides a small logging package <code>com.archimed.log</code> that is used internally by the other JDT packages to output log messages during
+        the execution of various methods of JDT classes.
+      </p><p>
+      Because JDT is normally integrated into other applications, application developers may have already chosen an existing
+      logging framework like for example Apache Log4J or the java.util.logging package.
+      The <code>com.archimed.log</code> package does not make use directly of any existing logging framework but can be set up so that it delegates the generation of
+      log statements to an underlying existing logging framework. In the absence of an existing logging framework, the package can generate log statements on its own.
+    </p>
+      <h1 id="loggingjdt">Logging with JDT's internal logging framework</h1>
+      <p>
+        By default, JDT is configured to use one instance of<code> com.archimed.log.DefaultJdtLogger</code> for writing all log messages from all the JDT classes.
+        The DefaultJdtLogger class defines seven log levels comparable with the Log4J log levels.
+        The default level is OFF which means no log messages are written.
+        The DefaultJdtLogger class holds a reference to a single OutputStream to which all log messages are written and which is initialized to System.out.
+      </p>
+      <p>
+        For example, to set the output level to the ERROR level and to direct the output of log messages to System.err :
+      </p>
+
+        <pre><code class="lang-java">DefaultJdtLogger.setLevel(DefaultJdtLogger.ERROR);
+          DefaultJdtLogger.setOutputStream(System.err);</code></pre>
+
+      <h1 id="loggingexisting">Integrating with an existing logging framework</h1>
+
+      <p>The logging mechanism in JDT is based on two interfaces:</p>
+
+        <pre><code class="lang-java">com.archimed.log.JdtLoggerFactory
+          com.archimed.log.JdtLogger</code></pre>
+
+      <p>
+        The JdtLoggerFactory interface defines one method that returns references to JdtLogger implementing classes.
+        The JdtLogger interface defines the necessary methods for logging messages at various log levels.
+        A JdtLoggerFactory can be specified with the static setJdtLoggerFactory method of the <code>com.archimed.dicom.Jdt</code> class.
+      </p><p>
+      All JDT classes that use logging retrieve a reference to a JdtLogger by first retrieving the current JdtLoggerFactory and then
+      retrieving a JdtLogger by using the getJdtLogger class of the factory.
+    </p><p>
+      For example the DicomObject class has declared:
+    </p>
+
+      <pre><code class="lang-java">protected JdtLogger log = Jdt.getJdtLoggerFactory().getJdtLogger(DicomObject.class);</code></pre>
+
+      <p>
+        By default, the installed factory is the <code>com.archimed.log.DefaultJdtLoggerFactory</code> which keeps a reference to a
+        single <code>com.archimed.log.DefaultJdtLogger</code> instance. This factory can be replaced by another factory that returns different implementations of <code>JdtLogger</code>.
+      </p><p>
+      In general to replace the default logging with logging from an existing log framework, one has to:
+    </p>
+
+      <ul>
+        <li>create a new factory that implements JdtLoggerFactory and that returns instances of JdtLogger implementing classes
+        <li>create a new JdtLogger implementation, making use of the logging functionality of the existing log framework
+      </ul>
+
+      <h1 id="example">Example: Using Apache Log4j</h1>
+      <p>As an example of replacing the default logging, two classes are provided that enable JDT to use Log4j as the logging framework:</p>
+
+        <pre><code class="lang-java">com.archimed.dicom.examples.Log4jLoggerFactory
+          com.archimed.dicom.examples.Log4jLogger</code></pre>
+
+      <p>The two classes wrap functionality of the org.apache.log4j.Logger class. To enable JDT logging using these classes the default factory must be replaced with this new factory:</p>
+
+      <pre><code class="lang-java">Jdt.setJdtLoggerFactory(new Log4jLoggerFactory());</code></pre>
+
+      <p>From that point on , JDT will log messages according to the current Log4j configuration. For example, to enable DEBUG level logging on all classes of JDT one would typically do:</p>
+
+      <pre><code class="lang-java">org.apache.log4j.Logger.getLogger("com.archimed").setLevel(org.apache.log4j.Level.DEBUG);</code></pre>
+
+    </div>
+  </div>
+</div>
+
+@@include('../partials/_footer.html')
+
+@@include('../partials/_script.html')
+
+</body>
+</html>
