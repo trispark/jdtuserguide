@@ -12,8 +12,7 @@ var gulp  = require('gulp'),
     rename = require('gulp-rename'),
     path = require('path'),
     awspublish = require("gulp-awspublish"),
-    fs = require("fs"),
-    aws = require("./aws");
+    fs = require("fs");
 
 
 // create a default task and just log a message
